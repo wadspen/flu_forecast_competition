@@ -6,4 +6,4 @@ website_url:
 license: cc-by-4.0
 team_model_designation: primary
 ensemble_of_hub_models: false
-methods: ARIMA
+methods: By state ARIMA
