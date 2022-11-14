@@ -2,6 +2,7 @@ library(lubridate)
 library(forecast)
 library(tidyr)
 library(dplyr)
+library(ggplot2)
 
 
 raw_ILI <- read.csv('https://raw.githubusercontent.com/cdcepi/Flusight-forecast-data/master/data-truth/truth-Incident%20Hospitalizations.csv')
@@ -11,11 +12,22 @@ levels <- 100*(quantiles[23:13]-quantiles[1:11])
 
 
 
-forecast_date <- ceiling_date(today(),unit='week',1)
+# forecast_date <- ceiling_date(today(),unit='week',2)
+forecast_date <- ymd('2022-11-14')
+forecast_plots <- list()
 all_forecasts <- data.frame()
-for (i in unique(raw_ILI$location)) {
-  mod <- auto.arima(ts(raw_ILI$value[raw_ILI$location==i]))
+m <- 1
+locs <- unique(raw_ILI$location)
+loc_names <- unique(raw_ILI$location_name)
+for (i in 1:length(locs)) {
+  mod <- auto.arima(ts(raw_ILI$value[raw_ILI$location==locs[i]]))
   forc <- forecast(mod,level=levels)
+  # forecast_plots[[m]] <- autoplot(forecast(mod,4))
+  ggp <- autoplot(forecast(mod,4)) + ggtitle(loc_names[i]) + 
+          ylab('hopitalizations') +
+          theme_bw()
+  forecast_plots[[i]] <- ggp
+  m <- m + 1
   low <- forc$lower[1:4,]
   low <- low[,order(colnames(low))]
   colnames(low) <- quantiles[11:1]
@@ -57,5 +69,19 @@ all_forecasts <- all_forecasts %>%
 all_forecasts <- all_forecasts %>% 
   mutate(value = ifelse(value >=0,value,0))
 
-file_name <- paste(getwd(),'/ISU_NiemiLab/',forecast_date,'-ISU_NiemiLab.csv',sep='')
-write.csv(all_forecasts,file_name)
+file_name <- paste(getwd(),'/ISU_NiemiLab/',
+                   forecast_date,'-ISU_NiemiLab.csv',sep='')
+# write.csv(all_forecasts,file_name,row.names = FALSE)
+
+library(gridExtra)
+pdf("plots.pdf", onefile = TRUE)
+for (i in seq(length(forecast_plots))) {
+  do.call("grid.arrange", args=list(top='Flu Forecast'),forecast_plots[[i]])  
+}
+
+do.call("grid.arrange", c(forecast_plots[1:12], nrow = 3)) 
+do.call("grid.arrange", c(forecast_plots[13:24], nrow = 3))
+do.call("grid.arrange", c(forecast_plots[25:36], nrow = 3))
+do.call("grid.arrange", c(forecast_plots[37:48], nrow = 3))
+do.call("grid.arrange", c(forecast_plots[49:length(forecast_plots)], nrow = 3))
+
