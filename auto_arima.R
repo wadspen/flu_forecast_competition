@@ -19,13 +19,13 @@ all_forecasts <- data.frame()
 m <- 1
 locs <- unique(raw_ILI$location)
 loc_names <- unique(raw_ILI$location_name)
-for (i in 1:length(locs)) {
-  mod <- auto.arima(ts(raw_ILI$value[raw_ILI$location==locs[i]]))
+for (i in locs) {
+  mod <- auto.arima(ts(raw_ILI$value[raw_ILI$location==i]))
   forc <- forecast(mod,level=levels)
   # forecast_plots[[m]] <- autoplot(forecast(mod,4))
-  ggp <- autoplot(forecast(mod,4)) + ggtitle(loc_names[i]) + 
-          ylab('hopitalizations') +
-          theme_bw()
+  # ggp <- autoplot(forecast(mod,4)) + ggtitle(loc_names[i]) + 
+  #         ylab('hopitalizations') +
+  #         theme_bw()
   forecast_plots[[i]] <- ggp
   m <- m + 1
   low <- forc$lower[1:4,]
@@ -70,8 +70,8 @@ all_forecasts <- all_forecasts %>%
   mutate(value = ifelse(value >=0,value,0))
 
 file_name <- paste(getwd(),'/ISU_NiemiLab/',
-                   forecast_date,'-ISU_NiemiLab.csv',sep='')
-# write.csv(all_forecasts,file_name,row.names = FALSE)
+                   forecast_date,'-ISU_NiemiLab-Flu.csv',sep='')
+write.csv(all_forecasts,file_name,row.names = FALSE)
 
 library(gridExtra)
 pdf("plots.pdf", onefile = TRUE)

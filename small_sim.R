@@ -1,5 +1,8 @@
 #simple simulation of asg to assess our MCMC fitting
 library(mixtools)
+library(boot)
+library(rstan)
+library(dplyr)
 
 
 ASG <- function(x,beta1,beta2,eta,mu,sig12,sig22) {
@@ -47,13 +50,14 @@ small_sim <- small_sim %>%
     c = rbinom(1,n,y)
   )
 
+# theta[5:6] <- theta[5:6]^2
 
 model_prior = "
 functions {
-   real asg(row_vector param, real eta, real x) {
+   real asg(row_vector param, row_vector betas, real x) {
     real beta1;
     real beta2;
-    //real eta;
+    real eta;
     real mu;
     real sig21;
     real sig22;
@@ -61,14 +65,13 @@ functions {
     
     beta1 = param[1];
     beta2 = param[2];
-    //eta = param[3];
+    eta = param[3];
     mu = param[4];
-    //print(mu);
     sig21 = param[5];
     sig22 = param[6];
     
-    ASG = (beta1 + (eta-beta1)*exp(-(x-mu)^2/(2*sig21^2)))*(x <mu) +
-       (beta2 + (eta-beta2)*exp(-(x-mu)^2/(2*sig22^2)))*(x >= mu);
+    ASG = ((beta1 + (eta-beta1)*exp(-((x-mu)^2)/(2*sig21^2)))*(x < mu) +
+       (beta2 + (eta-beta2)*exp(-((x-mu)^2)/(2*sig22^2)))*(mu <= x));
     return ASG;
   }
 }
@@ -82,12 +85,12 @@ int<lower=0> n_params;                          // number of parameters ASG
 
 
 vector[n_params] m0;
-matrix[n_params,n_params] C0;
-real eta;
+vector[n_params,n_params] C0;
+row_vector[6] betas;
 }
 parameters {
 
-row_vector[n_params] theta;
+row_vector[real real real<lower=0> real<lower=13> real<lower=0> real<lower=0>] theta;
 
 }
 
@@ -95,35 +98,96 @@ model {
 
 theta ~ multi_normal(m0,C0);
 
-for (i in 1:N) c[i] ~ binomial(n[i],inv_logit(asg(theta, eta, x[i]))); 
+for (i in 1:N) c[i] ~ binomial_logit(n[i],asg(theta, betas, x[i])); 
 
 }
 
-generated quantities {
-    vector[N] postpred_pr;
-    for (i in 1:N)
-      postpred_pr[i] = binomial_rng(n[i],inv_logit(asg(theta, eta,
-                                                    x[i])));
-  }
+//generated quantities {
+  //  vector[N] postpred_pr;
+    //for (i in 1:N)
+      //postpred_pr[i] = binomial_rng(n[i],asg(theta, betas,
+       //                                             x[i]));
+  //}
 "
+
+
+model_prior = "
+functions {
+   real asg(real beta1, real beta2, real eta, real mu, real sig1,
+   real sig2, real x) {
+    
+    real ASG;
+    
+    ASG = ((beta1 + (eta-beta1)*exp(-((x-mu)^2)/(2*sig1^2)))*(x < mu) +
+       (beta2 + (eta-beta2)*exp(-((x-mu)^2)/(2*sig2^2)))*(mu <= x));
+    return ASG;
+  }
+}
+
+data {
+int<lower=0> N;                                 // number of points
+int<lower=0> n[N];                              // patients
+int<lower=0> c[N];                              // positive cases
+real<lower=0> x[N];                             // week
+int<lower=0> n_params;                          // number of parameters ASG
+
+
+vector[n_params] m0;
+vector[n_params] C0;
+row_vector[6] betas;
+}
+parameters {
+
+real beta1;
+real beta2;
+real eta;
+real mu;
+real sig1;
+real sig2;
+
+}
+
+model {
+
+beta1 ~ normal(m0[1],C0[1]);
+beta2 ~ normal(m0[2],C0[2]);
+eta ~ normal(m0[3],C0[3]);
+mu ~ normal(m0[4],.01);
+sig1 ~ normal(m0[5],C0[5]);
+sig2 ~ normal(m0[6],C0[6]);
+
+for (i in 1:N) c[i] ~ binomial_logit(n[i],asg(beta1,beta2,eta,mu,sig1,sig2,x[i])); 
+
+}
+
+//generated quantities {
+  //  vector[N] postpred_pr;
+    //for (i in 1:N)
+      //postpred_pr[i] = binomial_rng(n[i],asg(theta, betas,
+       //                                             x[i]));
+  //}
+"
+
+
 m =stan_model(model_code=model_prior)
 # m = stan_model(model_code = model_prior)
 
-
+# small_simt <- small_sim
+small_sim <- small_simt[1:20,]
 dat = list(N = nrow(small_sim),
            n = small_sim$n,
            c = small_sim$c,
            x = small_sim$x,
            n_params = 6,
            m0 = theta,
-           C0 = diag(sigs^2),
-           eta = theta[3])
-rmle = sampling(m, dat, chains=1,iter=10000,warmup=4000)
+           C0 = sigs,
+           betas = theta)
+rmle = sampling(m, dat, chains=1,iter=10000,warmup=5000)
 
 
-par <- rstan::extract(rmle,pars=c('theta'))
-thetas <- par$theta
-traceplot(rmle,pars=c('theta'))
+par <- rstan::extract(rmle)#,pars=c('theta'))
+thetas <- do.call('cbind',par[1:6])
+traceplot(rmle)#,pars=c('theta'))
 
 predps <- apply(thetas,MARGIN=2,FUN=mean)
 w <- seq(0,53,length.out=1001)
@@ -133,8 +197,25 @@ y <- inv.logit(ASG(w,predps[1],predps[2],predps[3],predps[4],
 small_sim %>% 
   ggplot() +
   geom_point(aes(x=x,y=c/n)) +
-  geom_line(data=data.frame(w,y),aes(x=w,y=y))
-plot(y~w,type='l')
+  geom_line(data=data.frame(w,y),aes(x=w,y=y),colour='red')
+# plot(y~w,type='l')
+
+thetadf <- data.frame(thetas)
+colnames(thetadf) <- c('beta1','beta2','eta','mu','sig1','sig2')
+pairs(thetadf)
+
+library(gplots)
+hist2d(x=thetadf$mu,y=thetadf$sig2)
+
+library(ggplot2)
+thetadf %>%
+  ggplot(aes(x=mu,y=sig2)) +
+  geom_hex() +
+  theme_bw()
+
+
+
+
 
 
 
